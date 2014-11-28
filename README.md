@@ -7,6 +7,6 @@ This is the locality aware load balancer for HBase. Please check the wiki paage 
 
 ## Steps to run balancer
 
-* Copy LocalityAwareLoadBalancer.java file to master/balancer. 
-* Build HBase using: mvn package -DSkipTests
-* Change the property hbase.master.loadbalancer.class to org.apache.hadoop.hbase.master.balancer.LocalityAwareLoadBalancer
+* Copy `LocalityAwareLoadBalancer.java` file to master/balancer. 
+* Build HBase using: `mvn package -DSkipTests`
+* Change the property `hbase.master.loadbalancer.class` in hbase-site.xml to `org.apache.hadoop.hbase.master.balancer.LocalityAwareLoadBalancer`
