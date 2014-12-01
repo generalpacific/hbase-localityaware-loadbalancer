@@ -278,12 +278,11 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
 
   private float getLocalityIndex(HRegionInfo region, ServerAndLoad server) {
     try {
-      //HTableDescriptor tableDescriptor = getTableDescriptor(region.getTable());
       HTableDescriptor tableDescriptor = this.services.getTableDescriptors().get(region.getTable());
       if (tableDescriptor != null) {
         HDFSBlocksDistribution blocksDistribution =
                 HRegion.computeHDFSBlocksDistribution(getConf(), tableDescriptor, region);
-        return blocksDistribution.getBlockLocalityIndex(server.toString());
+        return blocksDistribution.getBlockLocalityIndex(server.getServerName().getHostname());
 
       }
     } catch (IOException ioe) {
