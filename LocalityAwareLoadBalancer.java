@@ -108,7 +108,7 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
 
     LOG.info(" ####################################################################################");
     LOG.info(" Before Locality-aware Balancing");
-    LOG.info(" Average=" + average + " Ceiling=" + ceiling);
+    LOG.info(" Average=" + average + " Ce=" + ceiling);
     for (ServerAndLoad server : serversByLoad.keySet()) {
       LOG.info("---------------" + "Server Name: " + server.getServerName() + "---------------");
       List<HRegionInfo> hRegionInfos = serversByLoad.get(server);
@@ -143,7 +143,7 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
       // Check if number of regions on current server is greater than floor.
       // Continue only if number regions is greater than floor.
       if (hRegionInfos.size() <= ceiling) {
-        LOG.debug("Number of HRegions <= floor (" + hRegionInfos.size() + " <= " + ceiling + ")");
+        LOG.debug("Number of HRegions <= ceiling (" + hRegionInfos.size() + " <= " + ceiling + ")");
         continue;
       }
       PriorityQueue<RegionServerRegionAffinity> queue = new PriorityQueue<RegionServerRegionAffinity>();
@@ -170,7 +170,7 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
         LOG.info("Affinity between server=" + server.getServerName() + " and region="+ hRegionInfo.getRegionNameAsString() + " is " + finalAffinity);
       }
 
-      LOG.info("All server and region affinities: " + queue);
+      LOG.info("Number of regions to move=" + numberOfRegionsToMove + " All server and region affinities: " + queue);
 
       // Get top numberOfRegionsToMove
       List<RegionServerRegionAffinity> listOfRegionsToMove = new ArrayList<RegionServerRegionAffinity>();
@@ -186,15 +186,16 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
         HRegionInfo hRegionInfoToMove = regionServerRegionAffinity.getHRegionInfo();
         ServerAndLoad serverToMove = null;
         double maxAffinity = Double.MIN_VALUE;
+        // Get the most affine server to hRegionInfoToMove
         for (ServerAndLoad activeServer : serversByLoad.keySet()) {
+          hRegionInfos = serversByLoad.get(activeServer);
           if (activeServer.equals(regionServerRegionAffinity.getServer())) {
             continue;
           }
           if (hRegionInfos.size() >= ceiling) {
-            LOG.debug("Number of HRegions >= floor (" + hRegionInfos.size() + " >= " + ceiling + ")");
+            LOG.debug("Number of HRegions >= ceiling (" + hRegionInfos.size() + " >= " + ceiling + ")");
             continue;
           }
-          hRegionInfos = serversByLoad.get(activeServer);
           regionAffinityNumber = (1 - hRegionInfos.size() / numRegions) * SERVER_BALANCER_WEIGHT;
           TableName table = hRegionInfoToMove.getTable();
           String tableNameAsString = table.getNameAsString();
@@ -216,9 +217,8 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
             maxAffinity = finalAffinity;
             serverToMove = activeServer;
           }
-          regionsToReturn.add(new RegionPlan(hRegionInfoToMove, regionServerRegionAffinity.getServer().getServerName(), serverToMove.getServerName()));
         }
-
+        regionsToReturn.add(new RegionPlan(hRegionInfoToMove, regionServerRegionAffinity.getServer().getServerName(), serverToMove.getServerName()));
       }
     }
 
