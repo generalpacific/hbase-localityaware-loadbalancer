@@ -108,7 +108,7 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
 
     LOG.info(" ####################################################################################");
     LOG.info(" Before Locality-aware Balancing");
-    LOG.info(" Average=" + average + " Floor=" + ceiling);
+    LOG.info(" Average=" + average + " Ceiling=" + ceiling);
     for (ServerAndLoad server : serversByLoad.keySet()) {
       LOG.info("---------------" + "Server Name: " + server.getServerName() + "---------------");
       List<HRegionInfo> hRegionInfos = serversByLoad.get(server);
