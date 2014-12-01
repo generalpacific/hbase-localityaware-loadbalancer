@@ -27,6 +27,8 @@ import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.master.RegionPlan;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.rest.model.StorageClusterStatusModel;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.util.Bytes;
 
 import java.io.IOException;
 import java.util.*;
@@ -88,18 +90,30 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
 
     ClusterLoadState cs = new ClusterLoadState(clusterMap);
 
-    if (!this.needsBalance(cs)) {
-      LOG.info("No balancing needed. Returning null.");
-      return null;
-    }
+    //kewal if (!this.needsBalance(cs)) return null;
 
     Cluster cluster = new Cluster(clusterMap, new HashMap<String, Deque<RegionLoad>>(), regionLocationFinder);
     NavigableMap<ServerAndLoad, List<HRegionInfo>> serversByLoad = cs.getServersByLoad();
     int numRegions = cs.getNumRegions();
 
     PriorityQueue<RegionServerRegionAffinity> queue = new PriorityQueue<RegionServerRegionAffinity>();
+    Configuration conf = new Configuration();    
 
+    LOG.info(" Before Locality-aware Balancing");
+    for (ServerAndLoad server : serversByLoad.keySet()) {
+      LOG.info("---------------" + "Server Name: " + server.getServerName() + "---------------");
+      List<HRegionInfo> hRegionInfos = serversByLoad.get(server);
+      LOG.info("Number of Regions:" + hRegionInfos.size());
+      for (HRegionInfo hRegionInfo : hRegionInfos){
+        LOG.info(String.format("Name of Region: %s ", hRegionInfo.getRegionNameAsString()));
+        //LOG.info(String.format("Size of Region in number of rows"+(Bytes.toInt(hRegionInfo.getStartKey())-Bytes.toInt(hRegionInfo.getEndKey()))));
+        LOG.info("Start Key: " + Bytes.toString(hRegionInfo.getStartKey()));
+        LOG.info("End Key: " + Bytes.toString(hRegionInfo.getEndKey()));
+      }
+      LOG.info("------------------------------------------------------------------------------");
+    }
 
+    if (!this.needsBalance(cs)) return null;
     // calculate allTableRegionNumber = total number of regions per table.
     Map<Integer, Integer> allTableRegionNumberMap = new HashMap<Integer , Integer>();
     for (int i = 0; i < cluster.numServers; ++i) {
@@ -126,9 +140,13 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
         int serverIndex = cluster.serversToIndex.get(server.getServerName().getHostAndPort());
         tableRegionAffinityNumber = (1 -
                 cluster.numRegionsPerServerPerTable[serverIndex][tableIndex] / allTableRegionNumberMap.get(tableIndex)) * TABLE_BALANCER_WEIGHT;
+        float localityIndex = getLocalityIndex(hRegionInfo, server) * LOCALITY_WEIGHT;
+        LOG.info("tableRegionaffinity: "+tableRegionAffinityNumber);
+        LOG.info("regionAffinityNUmber: "+regionAffinityNumber);
+        LOG.info("localityIndex: "+localityIndex);
         double finalAffinity = regionAffinityNumber +
                 tableRegionAffinityNumber +
-                getLocalityIndex(hRegionInfo, server) * LOCALITY_WEIGHT +
+                localityIndex +
                 getStickinessWeight(hRegionInfo);
         queue.add(new RegionServerRegionAffinity(server, hRegionInfo, finalAffinity));
         LOG.info("Affinity between server=" + server.getServerName() + " and region="+ hRegionInfo.getRegionNameAsString() + " is " + finalAffinity);
@@ -263,7 +281,7 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
   }
 
   private double getStickinessWeight(HRegionInfo hRegionInfo) {
-    int value = previouslyMovedRegions.contains(hRegionInfo) ? 1 : 0;
+    int value = previouslyMovedRegions.contains(hRegionInfo) ? 0 : 1;
     return value * STICKINESS_WEIGHT;
   }
 }
