@@ -90,16 +90,25 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
 
     ClusterLoadState cs = new ClusterLoadState(clusterMap);
 
-    //kewal if (!this.needsBalance(cs)) return null;
+    float average = cs.getLoadAverage(); // for logging
+    int ceiling = (int) Math.ceil(average * (1 + slop));
+    NavigableMap<ServerAndLoad, List<HRegionInfo>> serversByLoad = cs.getServersByLoad();
+
+    if (!this.needsBalance(cs)) {
+      LOG.info("Skipping load balancing because balanced cluster; " +
+              "servers=" + cs.getNumServers() + " " +
+              "regions=" + cs.getNumRegions() + " average=" + average + " " +
+              "mostloaded=" + serversByLoad.lastKey().getLoad() +
+              " leastloaded=" + serversByLoad.firstKey().getLoad());
+      return null;
+    }
 
     Cluster cluster = new Cluster(clusterMap, new HashMap<String, Deque<RegionLoad>>(), regionLocationFinder);
-    NavigableMap<ServerAndLoad, List<HRegionInfo>> serversByLoad = cs.getServersByLoad();
     int numRegions = cs.getNumRegions();
 
-    PriorityQueue<RegionServerRegionAffinity> queue = new PriorityQueue<RegionServerRegionAffinity>();
-    Configuration conf = new Configuration();    
-
+    LOG.info(" ####################################################################################");
     LOG.info(" Before Locality-aware Balancing");
+    LOG.info(" Average=" + average + " Floor=" + ceiling);
     for (ServerAndLoad server : serversByLoad.keySet()) {
       LOG.info("---------------" + "Server Name: " + server.getServerName() + "---------------");
       List<HRegionInfo> hRegionInfos = serversByLoad.get(server);
@@ -113,7 +122,6 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
       LOG.info("------------------------------------------------------------------------------");
     }
 
-    if (!this.needsBalance(cs)) return null;
     // calculate allTableRegionNumber = total number of regions per table.
     Map<Integer, Integer> allTableRegionNumberMap = new HashMap<Integer , Integer>();
     for (int i = 0; i < cluster.numServers; ++i) {
@@ -128,8 +136,18 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
       }
     }
 
+    List<RegionPlan> regionsToReturn = new ArrayList<RegionPlan>();
+
     for (ServerAndLoad server : serversByLoad.keySet()) {
       List<HRegionInfo> hRegionInfos = serversByLoad.get(server);
+      // Check if number of regions on current server is greater than floor.
+      // Continue only if number regions is greater than floor.
+      if (hRegionInfos.size() <= ceiling) {
+        LOG.debug("Number of HRegions <= floor (" + hRegionInfos.size() + " <= " + ceiling + ")");
+        continue;
+      }
+      PriorityQueue<RegionServerRegionAffinity> queue = new PriorityQueue<RegionServerRegionAffinity>();
+      int numberOfRegionsToMove = hRegionInfos.size() - ceiling;
       double regionAffinityNumber = (1 - hRegionInfos.size() / numRegions) * SERVER_BALANCER_WEIGHT;
       double tableRegionAffinityNumber = 0;
       // Calculate allTableRegionNumber
@@ -141,9 +159,9 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
         tableRegionAffinityNumber = (1 -
                 cluster.numRegionsPerServerPerTable[serverIndex][tableIndex] / allTableRegionNumberMap.get(tableIndex)) * TABLE_BALANCER_WEIGHT;
         float localityIndex = getLocalityIndex(hRegionInfo, server) * LOCALITY_WEIGHT;
-        LOG.info("tableRegionaffinity: "+tableRegionAffinityNumber);
-        LOG.info("regionAffinityNUmber: "+regionAffinityNumber);
-        LOG.info("localityIndex: "+localityIndex);
+        LOG.info("tableRegionaffinity: " + tableRegionAffinityNumber);
+        LOG.info("regionAffinityNUmber: " + regionAffinityNumber);
+        LOG.info("localityIndex: " + localityIndex);
         double finalAffinity = regionAffinityNumber +
                 tableRegionAffinityNumber +
                 localityIndex +
@@ -151,62 +169,57 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
         queue.add(new RegionServerRegionAffinity(server, hRegionInfo, finalAffinity));
         LOG.info("Affinity between server=" + server.getServerName() + " and region="+ hRegionInfo.getRegionNameAsString() + " is " + finalAffinity);
       }
-    }
 
-    LOG.info("All server and region affinities: " + queue);
+      LOG.info("All server and region affinities: " + queue);
 
-    List<RegionPlan> regionsToReturn = new ArrayList<RegionPlan>();
-
-    if (queue.isEmpty()) {
-      long endTime = System.currentTimeMillis();
-      LOG.info("Calculated a load balance in " + (endTime-startTime) + "ms. " +
-              "No regions to move");
-      return regionsToReturn;
-    }
-
-    // Get top NUMBER_OF_REGIONS_TO_MOVE
-    List<RegionServerRegionAffinity> listOfRegionsToMove = new ArrayList<RegionServerRegionAffinity>();
-    for (int i = 0; i < NUMBER_OF_REGIONS_TO_MOVE; ++i) {
-      if (queue.isEmpty()) {
-        continue;
-      }
-      listOfRegionsToMove.add(queue.peek());
-    }
-
-    // Search for the most affine servers to these Region Servers
-    for (RegionServerRegionAffinity regionServerRegionAffinity : listOfRegionsToMove) {
-      HRegionInfo hRegionInfoToMove = regionServerRegionAffinity.getHRegionInfo();
-      ServerAndLoad serverToMove = null;
-      double maxAffinity = Double.MIN_VALUE;
-      for (ServerAndLoad server : serversByLoad.keySet()) {
-        if (server.equals(regionServerRegionAffinity.getServer())) {
+      // Get top numberOfRegionsToMove
+      List<RegionServerRegionAffinity> listOfRegionsToMove = new ArrayList<RegionServerRegionAffinity>();
+      for (int i = 0; i < numberOfRegionsToMove; ++i) {
+        if (queue.isEmpty()) {
           continue;
         }
-        List<HRegionInfo> hRegionInfos = serversByLoad.get(server);
-        double regionAffinityNumber = (1 - hRegionInfos.size() / numRegions) * SERVER_BALANCER_WEIGHT;
-        TableName table = hRegionInfoToMove.getTable();
-        String tableNameAsString = table.getNameAsString();
-        int serverIndex = cluster.serversToIndex.get(server.getServerName().getHostAndPort());
-        int tableRegionAffinityNumber = 0;
-        if (cluster.tablesToIndex.containsKey(tableNameAsString)) {
-          Integer tableIndex = cluster.tablesToIndex.get(tableNameAsString);
-          tableRegionAffinityNumber = (1 -
-                  cluster.numRegionsPerServerPerTable[serverIndex][tableIndex] / allTableRegionNumberMap.get(tableIndex)) *
-                  TABLE_BALANCER_WEIGHT;
-        } else {
-          LOG.error("Table " + tableNameAsString + "not present in cluster.tablesToIndex");
-        }
-        double finalAffinity = regionAffinityNumber +
-                tableRegionAffinityNumber +
-                getLocalityIndex(hRegionInfoToMove, server) * LOCALITY_WEIGHT +
-                getStickinessWeight(hRegionInfoToMove);
-        if (finalAffinity > maxAffinity) {
-          maxAffinity = finalAffinity;
-          serverToMove = server;
-        }
-        regionsToReturn.add(new RegionPlan(hRegionInfoToMove, regionServerRegionAffinity.getServer().getServerName(), serverToMove.getServerName()));
+        listOfRegionsToMove.add(queue.poll());
       }
 
+      // Search for the most affine servers to these listOfRegionsToMove
+      for (RegionServerRegionAffinity regionServerRegionAffinity : listOfRegionsToMove) {
+        HRegionInfo hRegionInfoToMove = regionServerRegionAffinity.getHRegionInfo();
+        ServerAndLoad serverToMove = null;
+        double maxAffinity = Double.MIN_VALUE;
+        for (ServerAndLoad activeServer : serversByLoad.keySet()) {
+          if (activeServer.equals(regionServerRegionAffinity.getServer())) {
+            continue;
+          }
+          if (hRegionInfos.size() >= ceiling) {
+            LOG.debug("Number of HRegions >= floor (" + hRegionInfos.size() + " >= " + ceiling + ")");
+            continue;
+          }
+          hRegionInfos = serversByLoad.get(activeServer);
+          regionAffinityNumber = (1 - hRegionInfos.size() / numRegions) * SERVER_BALANCER_WEIGHT;
+          TableName table = hRegionInfoToMove.getTable();
+          String tableNameAsString = table.getNameAsString();
+          int serverIndex = cluster.serversToIndex.get(activeServer.getServerName().getHostAndPort());
+          tableRegionAffinityNumber = 0;
+          if (cluster.tablesToIndex.containsKey(tableNameAsString)) {
+            Integer tableIndex = cluster.tablesToIndex.get(tableNameAsString);
+            tableRegionAffinityNumber = (1 -
+                    cluster.numRegionsPerServerPerTable[serverIndex][tableIndex] / allTableRegionNumberMap.get(tableIndex)) *
+                    TABLE_BALANCER_WEIGHT;
+          } else {
+            LOG.error("Table " + tableNameAsString + "not present in cluster.tablesToIndex");
+          }
+          double finalAffinity = regionAffinityNumber +
+                  tableRegionAffinityNumber +
+                  getLocalityIndex(hRegionInfoToMove, activeServer) * LOCALITY_WEIGHT +
+                  getStickinessWeight(hRegionInfoToMove);
+          if (finalAffinity > maxAffinity) {
+            maxAffinity = finalAffinity;
+            serverToMove = activeServer;
+          }
+          regionsToReturn.add(new RegionPlan(hRegionInfoToMove, regionServerRegionAffinity.getServer().getServerName(), serverToMove.getServerName()));
+        }
+
+      }
     }
 
     LOG.info("Returning plan: " + regionsToReturn);
