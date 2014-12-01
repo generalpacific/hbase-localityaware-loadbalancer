@@ -88,7 +88,10 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
 
     ClusterLoadState cs = new ClusterLoadState(clusterMap);
 
-    if (!this.needsBalance(cs)) return null;
+    if (!this.needsBalance(cs)) {
+      LOG.info("No balancing needed. Returning null.");
+      return null;
+    }
 
     Cluster cluster = new Cluster(clusterMap, new HashMap<String, Deque<RegionLoad>>(), regionLocationFinder);
     NavigableMap<ServerAndLoad, List<HRegionInfo>> serversByLoad = cs.getServersByLoad();
