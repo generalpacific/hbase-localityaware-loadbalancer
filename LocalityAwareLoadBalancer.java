@@ -95,11 +95,11 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
     NavigableMap<ServerAndLoad, List<HRegionInfo>> serversByLoad = cs.getServersByLoad();
 
     if (!this.needsBalance(cs)) {
-      LOG.info("Skipping load balancing because balanced cluster; " +
+      /*LOG.info("Skipping load balancing because balanced cluster; " +
               "servers=" + cs.getNumServers() + " " +
               "regions=" + cs.getNumRegions() + " average=" + average + " " +
               "mostloaded=" + serversByLoad.lastKey().getLoad() +
-              " leastloaded=" + serversByLoad.firstKey().getLoad());
+              " leastloaded=" + serversByLoad.firstKey().getLoad());*/
       return null;
     }
 
@@ -152,6 +152,10 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
       double tableRegionAffinityNumber = 0;
       // Calculate allTableRegionNumber
       for (HRegionInfo hRegionInfo : hRegionInfos) {
+        // Do not move metaregion.
+        if (hRegionInfo.isMetaRegion()) {
+          continue;
+        }
         TableName table = hRegionInfo.getTable();
         String tableName = table.getNameAsString();
         int tableIndex = cluster.tablesToIndex.get(tableName);
