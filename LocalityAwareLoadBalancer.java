@@ -103,13 +103,19 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
       return null;
     }
 
+    // Additional check for locality aware load balancer as it only considers
+    // only max loaded servers
+    if (!(cs.getMaxLoad() > ceiling)) {
+      return null;
+    }
+
     Cluster cluster = new Cluster(clusterMap, new HashMap<String, Deque<RegionLoad>>(), regionLocationFinder);
     int numRegions = cs.getNumRegions();
 
     LOG.info(" ####################################################################################");
     LOG.info(" Before Locality-aware Balancing");
-    LOG.info(" Average=" + average + " Ce=" + ceiling);
-    for (ServerAndLoad server : serversByLoad.keySet()) {
+    LOG.info(" Average=" + average + " Ceiling=" + ceiling + " slop=" + slop);
+    /* for (ServerAndLoad server : serversByLoad.keySet()) {
       LOG.info("---------------" + "Server Name: " + server.getServerName() + "---------------");
       List<HRegionInfo> hRegionInfos = serversByLoad.get(server);
       LOG.info("Number of Regions:" + hRegionInfos.size());
@@ -120,7 +126,7 @@ public class LocalityAwareLoadBalancer extends BaseLoadBalancer {
         LOG.info("End Key: " + Bytes.toString(hRegionInfo.getEndKey()));
       }
       LOG.info("------------------------------------------------------------------------------");
-    }
+    } */
 
     // calculate allTableRegionNumber = total number of regions per table.
     Map<Integer, Integer> allTableRegionNumberMap = new HashMap<Integer , Integer>();
